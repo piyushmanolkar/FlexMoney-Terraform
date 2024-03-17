@@ -116,17 +116,17 @@ resource "aws_instance" "ec2_instance" {
   
 }
 
-resource "time_sleep" "wait_60_seconds" {
+resource "time_sleep" "wait_120_seconds" {
   depends_on = [aws_instance.ec2_instance]
 
-  create_duration = "60s"
+  create_duration = "120s"
 }
 
 # Create AMI from the EC2 instance
 resource "aws_ami_from_instance" "dep_ami" {
   name                = "${var.env}-ami"
   source_instance_id         = aws_instance.ec2_instance.id
-  depends_on          = [time_sleep.wait_60_seconds]
+  depends_on          = [time_sleep.wait_120_seconds]
 }
 
 # resource "aws_ec2_instance_state" "ec2_instance" {
