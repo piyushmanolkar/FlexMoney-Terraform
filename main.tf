@@ -7,13 +7,13 @@ resource "aws_vpc" "vpc" {
   cidr_block = "10.0.0.0/16"
 
   tags = {
-    Name = "${var.branch}-${var.vpc_name}"
+    Name = "${var.env}-${var.vpc_name}"
   }
 }
 
 # Security Group For EC2 Instances
 resource "aws_security_group" "ec2_sg" {
-  name = "${var.branch}-ec2-sg"
+  name = "${var.env}-ec2-sg"
   vpc_id = aws_vpc.vpc.id
 
   ingress {
@@ -31,9 +31,29 @@ resource "aws_security_group" "ec2_sg" {
   }
 }
 
+# Security Group For EC2 Instances
+resource "aws_security_group" "ami_sg" {
+  name = "${var.env}-ami-sg"
+  vpc_id = aws_vpc.vpc.id
+
+  ingress {
+    from_port = 22
+    to_port   = 22
+    protocol  = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port = 0
+    to_port   = 0
+    protocol  = -1
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
 # Security Group For ALB
 resource "aws_security_group" "alb_sg" {
-  name = "${var.branch}-alb-sg"
+  name = "${var.env}-alb-sg"
   vpc_id = aws_vpc.vpc.id
 
   ingress {
@@ -53,7 +73,7 @@ resource "aws_security_group" "alb_sg" {
 
 # Create Role For SSM EC2 Instances
 resource "aws_iam_role" "iam_role" {
-  name        = "${var.branch}-ec2-ssm-iam-role"
+  name        = "${var.env}-ec2-ssm-iam-role"
   description = "The role for the developer resources EC2"
   assume_role_policy = jsonencode(
   {
@@ -68,7 +88,7 @@ resource "aws_iam_role" "iam_role" {
 
 # Create Profile For EC2 Instances
 resource "aws_iam_instance_profile" "iam_instance_profile" {
-  name = "${var.branch}-ssm-iam-profile"
+  name = "${var.env}-ssm-iam-profile"
   role = aws_iam_role.iam_role.name
 }
 
@@ -78,13 +98,48 @@ resource "aws_iam_role_policy_attachment" "dev_resources_ssm_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# Define EC2 instance resource
+resource "aws_instance" "ec2_instance" {
+  ami           = var.ami
+  instance_type = var.instance_type
+  subnet_id     = aws_subnet.public_1a.id
+  vpc_security_group_ids = [ aws_security_group.ami_sg.id ]
+  iam_instance_profile = aws_iam_instance_profile.iam_instance_profile.name
+  user_data = templatefile("./user-data.tftpl", {backend_branch = var.backend_branch, frontend_branch = var.frontend_branch})
+  key_name = "AutoScalingKey"
+  
+  associate_public_ip_address = true
+
+  tags = {
+    Name = "${var.env}-ami-ec2-instance"
+  }
+  
+}
+
+resource "time_sleep" "wait_60_seconds" {
+  depends_on = [aws_instance.ec2_instance]
+
+  create_duration = "60s"
+}
+
+# Create AMI from the EC2 instance
+resource "aws_ami_from_instance" "dep_ami" {
+  name                = "${var.env}-ami"
+  source_instance_id         = aws_instance.ec2_instance.id
+  depends_on          = [time_sleep.wait_60_seconds]
+}
+
+# resource "aws_ec2_instance_state" "ec2_instance" {
+#   depends_on = [aws_ami_from_instance.dep_ami]
+#   instance_id = aws_instance.ec2_instance.id
+#   state       = "stopped"
+# }
+
 # EC2 Lauch Template
 resource "aws_launch_template" "launch_template" {
-  name_prefix   = "${var.branch}-asg-lt-"
-  image_id      = var.ami
+  name_prefix   = "${var.env}-asg-lt-"
+  image_id      = aws_ami_from_instance.dep_ami.id
   instance_type = var.instance_type
-
-  user_data = base64encode(file("./user-data.sh"))
 
   iam_instance_profile {
     name = aws_iam_instance_profile.iam_instance_profile.name
@@ -95,7 +150,7 @@ resource "aws_launch_template" "launch_template" {
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name = "${var.branch}-${var.instance_name}"
+      Name = "${var.env}-${var.instance_name}"
     }
   }
 
@@ -111,7 +166,7 @@ resource "aws_subnet" "public_1a" {
   availability_zone = "ap-south-1a"
 
   tags = {
-    Name = "${var.branch}-public-1a"
+    Name = "${var.env}-public-1a"
   }
 }
 
@@ -121,7 +176,7 @@ resource "aws_subnet" "public_1b" {
   availability_zone = "ap-south-1b"
 
   tags = {
-    Name = "${var.branch}-public-1b"
+    Name = "${var.env}-public-1b"
   }
 }
 
@@ -130,7 +185,7 @@ resource "aws_internet_gateway" "internet_gateway" {
   vpc_id = aws_vpc.vpc.id
 
   tags = {
-    Name = "${var.branch}-internet-gateway"
+    Name = "${var.env}-internet-gateway"
   }
 }
 
@@ -144,7 +199,7 @@ resource "aws_route_table" "public_rt" {
   }
 
   tags = {
-    Name = "${var.branch}-public-rt"
+    Name = "${var.env}-public-rt"
   }
 }
 
@@ -167,7 +222,7 @@ resource "aws_subnet" "private_1a" {
   availability_zone = "ap-south-1a"
 
   tags = {
-    Name = "${var.branch}-private-1a"
+    Name = "${var.env}-private-1a"
   }
 }
 
@@ -177,7 +232,7 @@ resource "aws_subnet" "private_1b" {
   availability_zone = "ap-south-1b"
 
   tags = {
-    Name = "${var.branch}-private-1b"
+    Name = "${var.env}-private-1b"
   }
 }
 
@@ -190,7 +245,7 @@ resource "aws_nat_gateway" "dev_nat_gw" {
   allocation_id = aws_eip.nat_gateway_eip.id
 
   tags = {
-    Name = "${var.branch}-nat-gateway"
+    Name = "${var.env}-nat-gateway"
   }
 }
 
@@ -204,7 +259,7 @@ resource "aws_route_table" "private_rt" {
   }
 
   tags = {
-    Name = "${var.branch}-private-rt"
+    Name = "${var.env}-private-rt"
   }
 }
 
@@ -222,7 +277,7 @@ resource "aws_route_table_association" "private_rt_subnet_assoc_1b" {
 
 # Auto-Scaling Group
 resource "aws_autoscaling_group" "auto_scaling_group" {
-  name                 = "${var.branch}-asg"
+  name                 = "${var.env}-asg"
   min_size             = var.auto_scaling_min
   max_size             = var.auto_scaling_max
   desired_capacity     = var.auto_scaling_desired
@@ -239,7 +294,7 @@ resource "aws_autoscaling_group" "auto_scaling_group" {
 
 # Load Balancer
 resource "aws_lb" "load_balancer" {
-  name               = "${var.branch}-lb"
+  name               = "${var.env}-lb"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb_sg.id]
@@ -260,7 +315,7 @@ resource "aws_lb_listener" "load_balancer_listener" {
 
 # Target Group For ALB
 resource "aws_lb_target_group" "load_balancer_tg" {
-  name     = "${var.branch}-load-balancer-tg"
+  name     = "${var.env}-load-balancer-tg"
   port     = 80
   protocol = "HTTP"
   vpc_id   = aws_vpc.vpc.id
@@ -279,7 +334,7 @@ resource "aws_autoscaling_attachment" "dev_autoscaling_attachment" {
 
 # Create a CloudWatch Metric Alarm for CPU Utilization
 resource "aws_cloudwatch_metric_alarm" "cpu_alarm" {
-  alarm_name          = "${var.branch}-cpu-utilization-alarm"
+  alarm_name          = "${var.env}-cpu-utilization-alarm"
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = "2"  # Number of consecutive periods the metric must be breaching to trigger the alarm
   metric_name         = "CPUUtilization"
@@ -293,7 +348,7 @@ resource "aws_cloudwatch_metric_alarm" "cpu_alarm" {
 
 # Scaling Policy for scaling out
 resource "aws_autoscaling_policy" "scale_out_policy" {
-  name                   = "${var.branch}-scale-out-policy"
+  name                   = "${var.env}-scale-out-policy"
   scaling_adjustment     = 1  # Increase by one instance
   adjustment_type        = "ChangeInCapacity"
   cooldown               = 300  # Cooldown period in seconds to prevent rapid scaling

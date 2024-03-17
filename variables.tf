@@ -1,7 +1,19 @@
-variable "branch" {
+variable "env" {
   description = "Branch name for resource tagging"
   type        = string
   default = "dev"
+}
+
+variable "backend_branch" {
+  description = "Bancknd Branch name"
+  type        = string
+  default = "main"
+}
+
+variable "frontend_branch" {
+  description = "Frontend Branch name"
+  type        = string
+  default = "main"
 }
 
 variable "vpc_name" {

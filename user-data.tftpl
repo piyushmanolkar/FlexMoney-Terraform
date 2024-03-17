@@ -36,8 +36,9 @@ CONF_APPEND
 sudo systemctl enable nginx
 sudo systemctl start nginx
 sudo git clone https://github.com/piyushmanolkar/FlexMoney-Frontend.git /var/www/html
+cd /var/www/html && git checkout ${backend_branch}
 sudo git clone https://github.com/piyushmanolkar/FlexMoney-Java-Backend.git /var/www/backend
-cd /var/www/backend 
+cd /var/www/backend && git checkout ${frontend_branch}
 sudo chmod +x ./gradlew
 sudo ./gradlew build
 sudo nohup java -jar build/libs/backend.jar &
