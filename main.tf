@@ -105,7 +105,6 @@ resource "aws_instance" "ec2_instance" {
   subnet_id     = aws_subnet.public_1a.id
   vpc_security_group_ids = [ aws_security_group.ami_sg.id ]
   iam_instance_profile = aws_iam_instance_profile.iam_instance_profile.name
-  user_data = templatefile("./user-data.tftpl", {backend_branch = var.backend_branch, frontend_branch = var.frontend_branch})
   key_name = "AutoScalingKey"
   
   associate_public_ip_address = true
@@ -113,27 +112,70 @@ resource "aws_instance" "ec2_instance" {
   tags = {
     Name = "${var.env}-ami-ec2-instance"
   }
+
+  provisioner "file" {
+
+    connection {
+      host = self.public_ip
+      type = "ssh"
+      user = "ec2-user"
+      private_key = file("./AutoScalingKey.pem")
+    }
+
+    source = "./nginx.conf"
+    destination = "/tmp/nginx.conf"
+  }
+
+  provisioner "file" {
+
+    connection {
+      host = self.public_ip
+      type = "ssh"
+      user = "ec2-user"
+      private_key = file("./AutoScalingKey.pem")
+    }
+
+    source = "./backend.service"
+    destination = "/tmp/backend.service"
+  }
+  
+  provisioner "remote-exec" {
+    connection {
+      host = self.public_ip
+      type = "ssh"
+      user = "ec2-user"
+      private_key = file("./AutoScalingKey.pem")
+    }
+    inline = [
+      "sudo amazon-linux-extras install nginx1 -y",
+      "sudo yum install java-17-amazon-corretto-devel git -y",
+      "sudo mv /tmp/nginx.conf /etc/nginx/conf.d/",
+      "sudo systemctl enable nginx",
+      "sudo systemctl start nginx",
+      "sudo git clone https://github.com/piyushmanolkar/FlexMoney-Frontend.git /var/www/html",
+      "cd /var/www/html && git checkout ${var.backend_branch}",
+      "sudo git clone https://github.com/piyushmanolkar/FlexMoney-Java-Backend.git /var/www/backend",
+      "cd /var/www/backend && git checkout ${var.frontend_branch}",
+      "cd /var/www/backend",
+      "sudo chmod +x ./gradlew",
+      "sudo ./gradlew build",
+      "sudo mv /tmp/backend.service /usr/lib/systemd/system/",
+      "sudo systemctl start backend.service",
+      "echo 'Finised execution'"
+    ]
+  }
   
 }
 
-resource "time_sleep" "wait_120_seconds" {
-  depends_on = [aws_instance.ec2_instance]
-
-  create_duration = "120s"
-}
 
 # Create AMI from the EC2 instance
 resource "aws_ami_from_instance" "dep_ami" {
   name                = "${var.env}-ami"
   source_instance_id         = aws_instance.ec2_instance.id
-  depends_on          = [time_sleep.wait_120_seconds]
+  depends_on          = [aws_instance.ec2_instance]
 }
 
-# resource "aws_ec2_instance_state" "ec2_instance" {
-#   depends_on = [aws_ami_from_instance.dep_ami]
-#   instance_id = aws_instance.ec2_instance.id
-#   state       = "stopped"
-# }
+
 
 # EC2 Lauch Template
 resource "aws_launch_template" "launch_template" {
@@ -330,20 +372,6 @@ resource "aws_lb_target_group" "load_balancer_tg" {
 resource "aws_autoscaling_attachment" "dev_autoscaling_attachment" {
   autoscaling_group_name = aws_autoscaling_group.auto_scaling_group.id
   lb_target_group_arn = aws_lb_target_group.load_balancer_tg.arn
-}
-
-# Create a CloudWatch Metric Alarm for CPU Utilization
-resource "aws_cloudwatch_metric_alarm" "cpu_alarm" {
-  alarm_name          = "${var.env}-cpu-utilization-alarm"
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  evaluation_periods  = "2"  # Number of consecutive periods the metric must be breaching to trigger the alarm
-  metric_name         = "CPUUtilization"
-  namespace           = "AWS/EC2"
-  period              = "300"  # Length of each period in seconds (5 minutes)
-  statistic           = "Average"
-  threshold           = "75"  # Threshold for triggering the alarm, in percentage
-  alarm_description   = "Alarm when CPU exceeds 75%"
-  alarm_actions       = [aws_autoscaling_policy.scale_out_policy.arn]  # Action to trigger when alarm is in ALARM state
 }
 
 # Scaling Policy for scaling out

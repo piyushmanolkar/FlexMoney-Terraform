@@ -1,0 +1,13 @@
+[Unit]
+Description=ROT13 demo service
+After=network.target
+StartLimitIntervalSec=0
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=ec2-user
+ExecStart=/usr/bin/java -jar /var/www/backend/build/libs/backend.jar
+
+[Install]
+WantedBy=multi-user.target
