@@ -138,6 +138,19 @@ resource "aws_instance" "ec2_instance" {
     source = "./backend.service"
     destination = "/tmp/backend.service"
   }
+
+  provisioner "file" {
+
+    connection {
+      host = self.public_ip
+      type = "ssh"
+      user = "ec2-user"
+      private_key = file("./AutoScalingKey.pem")
+    }
+
+    source = "./setup.sh"
+    destination = "/tmp/setup.sh"
+  }
   
   provisioner "remote-exec" {
     connection {
@@ -147,24 +160,17 @@ resource "aws_instance" "ec2_instance" {
       private_key = file("./AutoScalingKey.pem")
     }
     inline = [
-      "sudo amazon-linux-extras install nginx1 -y",
-      "sudo yum install java-17-amazon-corretto-devel git -y",
-      "sudo mv /tmp/nginx.conf /etc/nginx/conf.d/",
-      "sudo systemctl enable nginx",
-      "sudo systemctl start nginx",
-      "sudo git clone https://github.com/piyushmanolkar/FlexMoney-Frontend.git /var/www/html",
-      "cd /var/www/html && git checkout ${var.backend_branch}",
-      "sudo git clone https://github.com/piyushmanolkar/FlexMoney-Java-Backend.git /var/www/backend",
-      "cd /var/www/backend && git checkout ${var.frontend_branch}",
-      "cd /var/www/backend",
-      "sudo chmod +x ./gradlew",
-      "sudo ./gradlew build",
-      "sudo mv /tmp/backend.service /usr/lib/systemd/system/",
-      "sudo systemctl start backend.service",
-      "echo 'Finised execution'"
+      "sudo sh /tmp/setup.sh",
     ]
   }
   
+}
+
+# Adding Wait Time For Server to Initialize
+resource "time_sleep" "wait_60_seconds" {
+  depends_on = [aws_instance.ec2_instance]
+
+  create_duration = "60s"
 }
 
 
@@ -172,7 +178,7 @@ resource "aws_instance" "ec2_instance" {
 resource "aws_ami_from_instance" "dep_ami" {
   name                = "${var.env}-ami"
   source_instance_id         = aws_instance.ec2_instance.id
-  depends_on          = [aws_instance.ec2_instance]
+  depends_on          = [time_sleep.wait_60_seconds]
 }
 
 
